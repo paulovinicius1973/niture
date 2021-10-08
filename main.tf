@@ -134,7 +134,6 @@ resource "oci_core_instance" "webserver1" {
     ssh_authorized_keys = var.ssh_public_key
   }
 }
-}
 resource "oci_core_instance" "webserver2" {
   availability_domain = data.oci_identity_availability_domain.ad.name
   compartment_id      = var.compartment_ocid
