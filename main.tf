@@ -134,3 +134,96 @@ resource "oci_core_instance" "webserver1" {
     ssh_authorized_keys = var.ssh_public_key
   }
 }
+}
+resource "oci_core_instance" "webserver2" {
+  availability_domain = data.oci_identity_availability_domain.ad.name
+  compartment_id      = var.compartment_ocid
+  display_name        = "webserver2"
+  shape               = "VM.Standard.E2.1.Micro"
+  fault_domain        = "FAULT-DOMAIN-2"
+  create_vnic_details {
+    subnet_id        = oci_core_subnet.tcb_subnet.id
+    display_name     = "primaryvnic"
+    assign_public_ip = true
+    hostname_label   = "webserver2"
+  }
+  source_details {
+    source_type = "image"
+    source_id   = var.images[var.region]
+  }
+  metadata = {
+    ssh_authorized_keys = var.ssh_public_key
+    user_data = base64encode(var.user-data)
+  }
+}
+variable "user-data" {
+  default = <<EOF
+#!/bin/bash
+echo '################### webserver userdata begins #####################'
+touch ~opc/userdata.`date +%s`.start
+yum install httpd -y
+apachectl start
+systemctl enable httpd
+systemctl stop firewalld
+systemctl disable firewalld
+#firewall-cmd --zone=public --add-service=http
+#firewall-cmd --permanent --zone=public --add-service=http
+cd /var/www/html/
+wget https://objectstorage.us-ashburn-1.oraclecloud.com/p/u8j40_AS-7pRypC5boQT24w5QFPDTy-0j27BWBOfmsxbERTiuDtJQBIqfcsOH81F/n/idqfa2z2mift/b/bootcamp-oci/o/oci-f-handson-modulo-compute-website-files.zip
+unzip oci-f-handson-modulo-compute-website-files.zip
+chown -R apache:apache /var/www/html
+rm -rf oci-f-handson-modulo-compute-website-files.zip
+echo '################### webserver userdata ends #######################'
+touch ~opc/userdata.`date +%s`.finish
+EOF
+}
+resource "oci_load_balancer" "niture-lb" {
+  shape          = "10Mbps"
+  compartment_id = var.compartment_ocid
+  subnet_ids = [
+    oci_core_subnet.tcb_subnet.id,
+  ]
+  display_name = "niture-lb"
+  
+}
+resource "oci_load_balancer_backend_set" "niture-bes1" {
+  name             = "lb-bes1"
+  load_balancer_id = oci_load_balancer.niture-lb.id
+  policy           = "ROUND_ROBIN"
+  health_checker {
+    port                = "80"
+    protocol            = "HTTP"
+    response_body_regex = ".*"
+    url_path            = "/"
+  }
+}
+resource "oci_load_balancer_listener" "lb-listener1" {
+  load_balancer_id         = oci_load_balancer.niture-lb.id
+  name                     = "http"
+  default_backend_set_name = oci_load_balancer_backend_set.niture-bes1.name
+  port                     = 80
+  protocol                 = "HTTP"
+  connection_configuration {
+    idle_timeout_in_seconds = "2"
+  }
+}
+resource "oci_load_balancer_backend" "lb-be1" {
+  load_balancer_id = oci_load_balancer.niture-lb.id
+  backendset_name  = oci_load_balancer_backend_set.niture-bes1.name
+  ip_address       = oci_core_instance.webserver1.private_ip
+  port             = 80
+  backup           = false
+  drain            = false
+  offline          = false
+  weight           = 1
+}
+resource "oci_load_balancer_backend" "lb-be2" {
+  load_balancer_id = oci_load_balancer.niture-lb.id
+  backendset_name  = oci_load_balancer_backend_set.niture-bes1.name
+  ip_address       = oci_core_instance.webserver2.private_ip
+  port             = 80
+  backup           = false
+  drain            = false
+  offline          = false
+  weight           = 1
+}
